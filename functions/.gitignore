@@ -1,0 +1,16 @@
+# Compiled JavaScript files
+lib/
+
+# TypeScript v1 declaration files
+typings/
+
+# Node.js dependency directory
+node_modules/
+
+# Runtime configuration (contains API keys)
+.runtimeconfig.json
+
+# Environment variables
+.env
+.env.local
+

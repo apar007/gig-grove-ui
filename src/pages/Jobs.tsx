@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import JobCard from "@/components/JobCard";
@@ -12,28 +12,101 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Search, SlidersHorizontal } from "lucide-react";
-import { mockJobs } from "@/data/mockJobs";
+import { db } from "@/lib/firebase";
+import { collection, getDocs } from "firebase/firestore";
+
+type JobData = {
+  id: string; // Firestore document ID
+  freelancerId: string;
+  title: string;
+  description: string;
+  currency: string;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  skills: string[];
+  postedAt: string;
+  ownerId: number | null;
+  type: string;
+  status: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Helper function to format posted date
+const formatPostedDate = (dateString: string): string => {
+  const now = Date.now();
+  const postedTime = new Date(dateString).getTime();
+  const diffInMs = now - postedTime;
+  const diffInSeconds = Math.floor(diffInMs / 1000);
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  const diffInDays = Math.floor(diffInHours / 24);
+
+  if (diffInDays > 0) {
+    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+  } else if (diffInHours > 0) {
+    return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+  } else if (diffInMinutes > 0) {
+    return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+  } else {
+    return 'Just now';
+  }
+};
 
 const Jobs = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedJobType, setSelectedJobType] = useState("all");
   const [selectedExperience, setSelectedExperience] = useState("all");
   const [selectedLocation, setSelectedLocation] = useState("all");
+  const [jobs, setJobs] = useState<JobData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        console.log('Fetching jobs from Firestore...');
+        const jobsCollection = collection(db, 'jobs');
+        const querySnapshot = await getDocs(jobsCollection);
+        
+        const jobsData: JobData[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          jobsData.push({
+            id: doc.id, // Use Firestore document ID
+            ...data
+          } as JobData);
+        });
+        
+        console.log(`Fetched ${jobsData.length} jobs from Firestore`);
+        setJobs(jobsData);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Failed to load jobs: ${msg}`);
+        console.error('Error fetching jobs:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchJobs();
+  }, []);
 
   // Filter jobs based on selected filters
-  const filteredJobs = mockJobs.filter((job) => {
+  const filteredJobs = jobs.filter((job) => {
     const matchesSearch =
       searchQuery === "" ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      job.skills.some((skill) => skill.toLowerCase().includes(searchQuery.toLowerCase()));
+      job.skills.some((skill: string) => skill.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      job.description.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesJobType = selectedJobType === "all" || job.jobType === selectedJobType;
-    const matchesExperience =
-      selectedExperience === "all" || job.experienceLevel === selectedExperience;
-    const matchesLocation =
-      selectedLocation === "all" || job.location.includes(selectedLocation);
-
-    return matchesSearch && matchesJobType && matchesExperience && matchesLocation;
+    // For Firestore jobs, we only filter by search since they don't have jobType/experienceLevel/location
+    // All jobs are remote freelance jobs from the API
+    return matchesSearch;
   });
 
   return (
@@ -141,12 +214,45 @@ const Jobs = () => {
           )}
         </div>
 
+        {/* Remote/API loading & errors */}
+        {isLoading && (
+          <div className="text-sm text-muted-foreground mb-4">Loading jobs...</div>
+        )}
+        {error && (
+          <div className="text-sm text-red-600 mb-4">{error}</div>
+        )}
+
         {/* Job Listings */}
         {filteredJobs.length > 0 ? (
           <div className="grid lg:grid-cols-2 gap-6">
-            {filteredJobs.map((job) => (
-              <JobCard key={job.id} {...job} />
-            ))}
+            {filteredJobs.map((job) => {
+              // Format budget for display
+              const formatBudget = () => {
+                if (job.budgetMin && job.budgetMax) {
+                  return `${job.currency}${job.budgetMin}-${job.budgetMax}`;
+                } else if (job.budgetMin) {
+                  return `${job.currency}${job.budgetMin}+`;
+                } else if (job.budgetMax) {
+                  return `Up to ${job.currency}${job.budgetMax}`;
+                }
+                return "Rate not specified";
+              };
+
+              // Transform Firestore data to match JobCard props
+              const transformedJob = {
+                id: job.id, // Use Firestore document ID
+                title: job.title,
+                company: "Freelancer Project",
+                location: "Remote",
+                jobType: job.type || "Freelance",
+                payRate: formatBudget(),
+                postedDate: formatPostedDate(job.postedAt),
+                description: job.description,
+                skills: job.skills,
+              };
+
+              return <JobCard key={job.id} {...transformedJob} />;
+            })}
           </div>
         ) : (
           <div className="text-center py-20">
