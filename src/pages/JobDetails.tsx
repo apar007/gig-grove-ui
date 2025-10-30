@@ -24,10 +24,12 @@ import {
   Share2,
   ExternalLink,
   Sparkles,
+  BookmarkCheck,
 } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, updateDoc, arrayRemove, arrayUnion } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/components/ui/use-toast";
 
 type JobData = {
   id: string;
@@ -45,6 +47,7 @@ type JobData = {
   source: string;
   createdAt: string;
   updatedAt: string;
+  seoUrl: string; // Added seoUrl to JobData type
 };
 
 const JobDetails = () => {
@@ -63,6 +66,13 @@ const JobDetails = () => {
   // Save Draft states
   const [isSaving, setIsSaving] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
+
+  // Bookmark states
+  const [isSaved, setIsSaved] = useState(false);
+  const { toast } = useToast();
+
+  // Share states
+  const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -100,6 +110,27 @@ const JobDetails = () => {
 
     fetchJob();
   }, [id]);
+
+  // Check if job is saved on mount
+  useEffect(() => {
+    if (!currentUser || !jobData?.id) {
+      setIsSaved(false);
+      return;
+    }
+    const check = async () => {
+      try {
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (userDoc.exists()) {
+          const savedJobs = userDoc.data().savedJobs || [];
+          setIsSaved(savedJobs.includes(jobData.id));
+        }
+      } catch (e) {
+        setIsSaved(false);
+      }
+    };
+    check();
+  }, [currentUser, jobData?.id]);
 
   // Loading state
   if (loading) {
@@ -274,6 +305,48 @@ const JobDetails = () => {
     }
   };
 
+  const handleSaveToggle = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentUser) {
+      toast({
+        title: "Sign In Required",
+        description: "Please sign in to save this job.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      if (isSaved) {
+        await updateDoc(userDocRef, { savedJobs: arrayRemove(jobData.id) });
+        setIsSaved(false);
+        toast({ title: "Job Removed", description: "Job removed from your saved jobs." });
+      } else {
+        await updateDoc(userDocRef, { savedJobs: arrayUnion(jobData.id) });
+        setIsSaved(true);
+        toast({ title: "Job Saved!", description: "Job added to your saved jobs." });
+      }
+    } catch (e) {
+      toast({ title: "Error", description: "Could not update saved jobs.", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleShare = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1000);
+      toast({ title: "Link Copied!" });
+    } catch {
+      toast({ title: "Error", description: "Could not copy link.", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -297,11 +370,13 @@ const JobDetails = () => {
                     <p className="text-xl text-muted-foreground font-medium">Freelancer Project</p>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" onClick={handleShare}>
                       <Share2 className="w-5 h-5" />
+                      {shareCopied && <span className="absolute top-0 right-0 text-xs bg-white px-1 rounded shadow">Copied!</span>}
                     </Button>
-                    <Button variant="ghost" size="icon">
-                      <Bookmark className="w-5 h-5" />
+                    <Button variant="ghost" size="icon"
+                      onClick={handleSaveToggle} disabled={isSaving} className={isSaved ? "text-primary" : undefined}>
+                      {isSaved ? <BookmarkCheck className="w-5 h-5 fill-current" /> : <Bookmark className="w-5 h-5" />}
                     </Button>
                   </div>
                 </div>
@@ -381,8 +456,15 @@ const JobDetails = () => {
 
                 <Separator />
 
-                <Button variant="hero" className="w-full" size="lg">
-                  Apply Now
+                <Button
+                  asChild
+                  variant="hero"
+                  className="w-full"
+                  size="lg"
+                >
+                  <a href={`https://www.freelancer.com/projects/${jobData.seoUrl}`} target="_blank" rel="noopener noreferrer">
+                    Apply Now
+                  </a>
                 </Button>
 
                 <Button 
@@ -404,10 +486,7 @@ const JobDetails = () => {
                   )}
                 </Button>
 
-                <Button variant="outline" className="w-full">
-                  <ExternalLink className="w-4 h-4 mr-2" />
-                  View Original Posting
-                </Button>
+                {/* Removed View Original Posting button */}
               </div>
             </Card>
 
